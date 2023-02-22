@@ -1,0 +1,1 @@
+from .rush import main
