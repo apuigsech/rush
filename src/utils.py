@@ -1,4 +1,7 @@
-from service import Service
+import re
+from configobj import ConfigObj, Section
+
+from services import Service
 
 def config_overlay(config, keys, value):
     keys = keys.split('.')
@@ -15,34 +18,45 @@ def config_overlay(config, keys, value):
     return config
 
 
-def input_config(input_url, config):
-    for i in config['inputs']:
-        if i in input_url:
-            local_config = config['inputs'][i]
-
-    local_config = load_services(local_config, config)
-
-    return local_config
-
-def transform_config(name, config):
-    local_config = config['transforms'][name]
-    local_config = load_services(local_config, config)
-    return local_config
+def config_resolv(config):
+    config['input'] = config_resolv_services(config['inputs'], config['services'])
+    config['transforms'] = config_resolv_services(config['transforms'], config['services'])
+    return config
 
 
-def load_services(local_config, config):
-    services = {}
+def config_resolv_services(config, services_config={}):
+    for key in config:
+        if type(config[key]) == Section:
+            config_resolv_services(config[key], services_config)
+        else:
+            if key == 'services':
+                pattern = r',\s*(?![^()]*\))'
+                print(key, config[key])
+                services_list = re.split(pattern, config[key])
+                config['services'] = {}
+                for service in services_list:
+                    (service_type, service_name, local_service_config) = config_service_parse(service)  
+                    service_config = services_config[service_type][service_name]
+                    for key, value in local_service_config.items():
+                        service_config[key] = value
+                    config['services'][service_type] = Service(service_type, service_name, service_config)
+    return config
 
-    if 'services' not in local_config:
-        return local_config
 
-    if isinstance(local_config['services'], str):
-        local_config['services'] = [local_config['services']]
-
-    for service in local_config['services']:
-        service_type, service_name = service.split('.')
-        services[service_type] = Service(service_type, service_name, config['services'][service_type][service_name])
-    
-    local_config['services'] = services
-
-    return local_config
+def config_service_parse(service):
+    pattern = r'^(\w+)\.(\w+)(?:\((.*)\))?$'
+    match = re.match(pattern, service)
+    if match:
+        service_type, service_name, service_config_str = match.groups()
+        service_config = {}
+        if service_config_str:
+            for c in service_config_str.split(','):
+                c = c.strip()
+                if '=' in c:
+                    key, value = c.split('=', 1)
+                    service_config[key.strip()] = value.strip()
+                else:
+                    service_config[p] = 'true'
+        return service_type, service_name, service_config
+    else:
+        return None
